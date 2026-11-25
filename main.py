@@ -1,295 +1,464 @@
 #!/usr/bin/env python3
-"""THE DAY IN BRIEF — Tuesday 24 November 2026.
+"""The Day in Brief — a one-page broadsheet poster for 24 November 2026.
 
-A pure-Pillow program that draws a one-page broadsheet poster summing up
-the world news of Tuesday 24 November 2026. It writes entry.png (1024x1024)
-next to this file. No network, no input files, fully deterministic: two
-runs write byte-identical output.
+A single 1024x1024 front page, drawn with Pillow: masthead, date bar,
+the lead climate story with a cracked globe, four story rows, an
+"Also today" box and a source line. Everything is laid out by hand,
+in the style of a printed newspaper front page.
 
-Run:  python3 main.py
+Run it and it writes entry.png next to this file.
 """
-import hashlib
+
 import math
-import os
 
 from PIL import Image, ImageDraw, ImageFont
 
+# ---------------------------------------------------------------------------
+# Page and palette
+# ---------------------------------------------------------------------------
+
 SIZE = 1024
-HERE = os.path.dirname(os.path.abspath(__file__))
+MARGIN = 30
+RIGHT = SIZE - MARGIN  # right edge of the content column
 
-# ---------------------------------------------------------------- palette
-PAPER = (248, 244, 233)
-CARD = (255, 252, 244)
-TEAL = (15, 61, 62)
-TEAL_SOFT = (226, 236, 234)
-CRIMSON = (178, 32, 32)
-CRIMSON_DARK = (140, 20, 20)
-INK = (24, 24, 22)
-MUTED = (105, 100, 88)
-RULE = (190, 183, 164)
-OCEAN = (43, 102, 168)
-LEAF = (52, 148, 88)
-GOLD = (212, 160, 40)
-AMBER = (245, 130, 32)
-WHITE = (255, 255, 255)
+PAPER = (248, 244, 233)      # warm newsprint
+BOX = (255, 252, 244)        # story boxes, a touch lighter than the page
+INK = (24, 24, 22)           # headlines and body text
+RED = (178, 32, 32)          # kickers and the crack in the globe
+DARK_RED = (140, 20, 20)     # the lead story's side bar
+TEAL = (15, 61, 62)          # date bar and the globe's outline
+BORDER = (190, 183, 164)     # hairlines and box edges
+GREY = (105, 100, 88)        # the source line
+GLOBE_BLUE = (43, 102, 168)
+GLOBE_GREEN = (52, 148, 88)
+CHIP_GREEN = (16, 140, 90)
+CHIP_EDGE = (0, 96, 64)       # the dark edge round the chip
+BRONZE = (208, 160, 32)       # the chip's pins, a bronze gold
+BUILDING = (112, 112, 112)    # the factory walls
+CHIMNEY = (80, 80, 80)        # the factory chimney
+SMOKE = (176, 176, 160)       # the smoke above the chimney
+GOLD = (245, 176, 32)
+ORANGE = (255, 140, 0)
+ALSO_BG = (226, 236, 234)    # pale blue-green for the Also Today box
 
-SERIF = "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"
-SANS_B = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
-SANS_R = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+# ---------------------------------------------------------------------------
+# Type
+# ---------------------------------------------------------------------------
+# One serif for every headline, one sans for the body text, and the wider
+# DejaVu face for the big red kickers. The serif sizes are the ones that
+# set the headlines to the widths the layout wants.
+
+FONTS = {
+    "serif": "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+    "sans": "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "sans-bold": "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    # The wider DejaVu face, for the two big red kickers up top.
+    "display": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+}
 
 
-def load(path, size):
-    return ImageFont.truetype(path, size)
+def font(kind, size):
+    """One of the poster's four faces, at the given size."""
+    return ImageFont.truetype(FONTS[kind], size)
 
 
-def wrap_text(draw, text, font, max_width):
-    """Greedy word wrap; returns the lines that fit inside max_width."""
-    lines = []
-    current = ""
-    for word in text.split():
-        trial = (current + " " + word).strip()
-        if draw.textlength(trial, font=font) <= max_width:
-            current = trial
+TITLE_FONT = font("serif", 62)
+LEAD_HEAD_FONT = font("serif", 48)
+ROW_HEAD_FONT = font("serif", 30)
+KICKER_FONT = font("display", 18)
+LEAD_KICKER_FONT = font("display", 20)
+ROW_KICKER_FONT = font("display", 18)
+DATE_FONT = font("sans-bold", 31)
+LEAD_DECK_FONT = font("sans", 24)
+ROW_DECK_FONT = font("sans", 21)
+ALSO_HEAD_FONT = font("sans-bold", 22)
+ALSO_LABEL_FONT = font("sans-bold", 18)
+ALSO_TEXT_FONT = font("sans", 18)
+FOOTER_FONT = font("sans", 17)
+
+# ---------------------------------------------------------------------------
+# The day's stories
+# ---------------------------------------------------------------------------
+
+LEAD = {
+    "kicker": "CLIMATE SUMMIT • ANTALYA, TÜRKIYE",
+    "headline": ["CLIMATE TALKS", "COLLAPSE"],
+    "deck": (
+        "UN talks fail after 50 hours of overtime — the first COP collapse "
+        "since Copenhagen 2009. Deadlock: fossil fuels."
+    ),
+}
+
+STORIES = [
+    {
+        "kicker": "WAR • OFF LIBYA",
+        "headline": "Ukraine sinks Russian warship",
+        "deck": "Sea drones sank the corvette Merkury 2,400 km from the front line.",
+        "icon": "warship",
+    },
+    {
+        "kicker": "ENERGY • STRAIT OF HORMUZ",
+        "headline": "Tankers ablaze after mine strikes",
+        "deck": "Three tankers catch fire; Iran says it downed a US drone.",
+        "icon": "tanker",
+    },
+    {
+        "kicker": "MARKETS • NVIDIA",
+        "headline": "Huang returns; shares jump 30%",
+        "deck": "CEO reinstated 11 days after resigning; S&P 500 up 4.7%.",
+        "icon": "chip",
+    },
+    {
+        "kicker": "ASIA • JAKARTA",
+        "headline": "24 killed in factory fire",
+        "deck": "A blaze sweeps a food factory; dozens still missing.",
+        "icon": "factory",
+    },
+]
+
+ALSO_LEFT = [
+    ("GAZA", "Strikes kill four, incl. a UN aid worker."),
+    ("TECH", "States sue Musk firms over Grok images."),
+    ("USA", "Storms threaten Thanksgiving travel."),
+]
+
+ALSO_RIGHT = [
+    ("BANGLADESH", "Hasina plans return on 16 December."),
+    ("NATO", "Russia probed NATO airspace 25 times."),
+    ("CUBA", "WHO chief visits amid a health crisis."),
+]
+
+FOOTER = "Sources: CNN • Reuters • AP • Al Jazeera • WSJ • The Times — 24 November 2026"
+
+# ---------------------------------------------------------------------------
+# Layout
+# ---------------------------------------------------------------------------
+
+MASTHEAD_KICKER_TOP = 37
+TITLE_TOP = 64
+RULE_TOP_Y = 140
+RULE_BOTTOM_Y = 147
+DATE_BAR = (MARGIN, 158, RIGHT, 204)
+LEAD_BOX = (MARGIN, 214, RIGHT, 430)
+LEAD_TEXT_X = 56
+LEAD_KICKER_X = 57
+LEAD_DECK_X = 58
+LEAD_DECK_WIDTH = 700
+ROW_TOPS = (440, 544, 648, 752)
+ROW_HEIGHT = 102
+ROW_KICKER_DY = 13
+ROW_HEADLINE_DY = 38
+ROW_DECK_DY = 72
+ROW_HEADLINE_X = 158
+ROW_DECK_X = 158  # the deck's first letter sits a pixel left of the kicker's
+ICON_CENTRE_X = 93
+ALSO_BOX = (MARGIN, 860, RIGHT, 962)
+ALSO_HEAD_TOP = 870
+ALSO_HEAD_X = 48
+ALSO_ITEM_TOPS = (900, 922, 944)
+ALSO_LEFT_X = 48
+ALSO_RIGHT_X = 528
+FOOTER_TOP = 974
+
+GLOBE_CENTRE = (872, 320)
+GLOBE_RADIUS = 70
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+def wrap(draw, text, typeface, width):
+    """Split text into lines that fit width, on word boundaries."""
+    words = text.split()
+    lines, line = [], ""
+    for word in words:
+        trial = f"{line} {word}".strip()
+        if draw.textlength(trial, font=typeface) <= width:
+            line = trial
         else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
     return lines
 
 
-def draw_lines(draw, x, y, lines, font, fill, leading):
-    for line in lines:
-        draw.text((x, y), line, font=font, fill=fill)
-        y += leading
-    return y
+def centred(draw, top, text, typeface, fill, cx=SIZE // 2):
+    """Draw text centred on cx, with top as its top edge."""
+    width = draw.textlength(text, font=typeface)
+    draw.text((cx - width / 2, top), text, font=typeface, fill=fill)
 
 
-# ------------------------------------------------------------------ icons
-def draw_globe(draw, cx, cy, radius):
-    """Blue globe with green continents, white meridians and a red crack."""
-    box = [cx - radius, cy - radius, cx + radius, cy + radius]
-    draw.ellipse(box, fill=OCEAN, outline=TEAL, width=3)
-    # continents: simple blobby polygons clipped by hand to the circle
-    land = [
-        [(cx - 52, cy - 30), (cx - 28, cy - 52), (cx - 6, cy - 34),
-         (cx - 18, cy - 8), (cx - 44, cy - 6)],
-        [(cx + 8, cy - 44), (cx + 38, cy - 52), (cx + 52, cy - 26),
-         (cx + 30, cy - 12), (cx + 12, cy - 22)],
-        [(cx - 40, cy + 18), (cx - 10, cy + 8), (cx + 4, cy + 30),
-         (cx - 22, cy + 48), (cx - 46, cy + 40)],
-        [(cx + 26, cy + 22), (cx + 50, cy + 34), (cx + 40, cy + 56),
-         (cx + 18, cy + 48)],
-    ]
-    for poly in land:
-        draw.polygon(poly, fill=LEAF)
-    # latitude lines
-    for frac, half in ((0.45, 0.89), (0.62, 0.78)):
-        y = cy - radius + int(2 * radius * frac)
-        w = int(radius * half)
-        draw.arc([cx - w, y - 14, cx + w, y + 14], 200, 340, fill=WHITE, width=2)
-    # red crack across the globe
-    crack = [(cx - 48, cy - 58), (cx - 20, cy - 28), (cx - 36, cy + 2),
-             (cx - 8, cy + 30), (cx - 24, cy + 60)]
-    draw.line(crack, fill=CRIMSON, width=5, joint="curve")
-    draw.line(crack, fill=WHITE, width=1, joint="curve")
+def box(draw, rect, fill, outline=BORDER, width=2):
+    """A filled rectangle with a two-pixel edge, as the old broadsheets had."""
+    draw.rectangle(rect, fill=fill, outline=outline, width=width)
 
 
-def draw_waves(draw, x, y, width, colour=OCEAN):
-    for dx in range(0, width, 34):
-        draw.arc([x + dx, y, x + dx + 32, y + 14], 180, 360, fill=colour, width=3)
+# ---------------------------------------------------------------------------
+# Icons
+# ---------------------------------------------------------------------------
+# Each icon lives in the 114-pixel strip at the left of its row, centred
+# on ICON_CENTRE_X. The row's top edge is passed in so the same drawing
+# code works for any row.
+
+def draw_warship(draw, top):
+    """A warship under a rising sun."""
+    cx = ICON_CENTRE_X
+    # The sun, with rays all round it. The rays reach further sideways
+    # than up and down, so the sun fits its row.
+    sun = (cx, top + 22)
+    for step in range(12):
+        angle = math.radians(step * 30)
+        reach = 22 + 6 * abs(math.cos(angle))
+        inner = (sun[0] + 13 * math.cos(angle), sun[1] + 13 * math.sin(angle))
+        outer = (sun[0] + reach * math.cos(angle), sun[1] + reach * math.sin(angle))
+        draw.line([inner, outer], fill=ORANGE, width=6)
+    draw.ellipse(
+        [sun[0] - 12, sun[1] - 12, sun[0] + 12, sun[1] + 12], fill=GOLD
+    )
+    # Mast and flag, riding on the sun.
+    draw.line([(cx, top + 18), (cx, top + 42)], fill=INK, width=3)
+    draw.polygon([(cx, top + 17), (cx + 18, top + 23), (cx, top + 29)], fill=RED)
+    # Superstructure, then the hull, wider at the top than at the waterline.
+    draw.rectangle([72, top + 40, 116, top + 54], fill=TEAL)
+    draw.polygon(
+        [(48, top + 54), (140, top + 54), (130, top + 78), (58, top + 78)],
+        fill=TEAL,
+    )
+    # Three wave arcs under the hull.
+    for x0 in (47, 81, 115):
+        draw.arc([x0, top + 84, x0 + 30, top + 98], 180, 360, fill=GLOBE_BLUE, width=2)
 
 
-def draw_warship(draw, x, y):
-    """Warship under a blast: orange starburst, mast, hull, waves."""
-    bx, by = x + 50, y + 20
-    for angle in range(0, 360, 30):
-        a = math.radians(angle)
-        draw.line([bx, by, bx + 28 * math.cos(a), by + 28 * math.sin(a)],
-                  fill=AMBER, width=6)
-    draw.ellipse([bx - 12, by - 12, bx + 12, by + 12], fill=(255, 176, 32))
-    draw.line([x + 50, y + 16, x + 50, y + 50], fill=INK, width=4)
-    draw.polygon([(x + 50, y + 16), (x + 70, y + 22), (x + 50, y + 28)],
-                 fill=CRIMSON)
-    draw.polygon([(x + 4, y + 50), (x + 96, y + 50), (x + 86, y + 76),
-                  (x + 14, y + 76)], fill=TEAL)
-    draw.rectangle([x + 28, y + 38, x + 72, y + 50], fill=TEAL)
-    draw_waves(draw, x + 2, y + 82, 96)
+def draw_tanker(draw, top):
+    """A tanker under a mine and a flame."""
+    # The mine, top left, spikes and all. Its spikes reach further
+    # sideways than up and down, the same shape as the sun's rays.
+    mine = (60, top + 24)
+    for step in range(8):
+        angle = math.radians(step * 45)
+        reach = 13 + 6 * abs(math.cos(angle))
+        inner = (mine[0] + 12 * math.cos(angle), mine[1] + 12 * math.sin(angle))
+        outer = (mine[0] + reach * math.cos(angle), mine[1] + reach * math.sin(angle))
+        draw.line([inner, outer], fill=INK, width=4)
+    draw.ellipse(
+        [mine[0] - 12, mine[1] - 12, mine[0] + 12, mine[1] + 12], fill=INK
+    )
+    # The flame, a teardrop with a yellow heart, over the deck.
+    draw.polygon(
+        [(78, top + 8), (89, top + 26), (86, top + 38), (70, top + 38), (67, top + 26)],
+        fill=ORANGE,
+    )
+    draw.polygon(
+        [(78, top + 22), (81, top + 28), (78, top + 33), (75, top + 28)],
+        fill=GOLD,
+    )
+    # The bridge, its bow edge bulging out to the left.
+    draw.polygon(
+        [(50, top + 36), (116, top + 36), (116, top + 50), (59, top + 50), (46, top + 42)],
+        fill=INK,
+    )
+    # Black hull above the waterline, red hull below it.
+    draw.polygon(
+        [(53, top + 50), (139, top + 50), (132, top + 66), (60, top + 66)],
+        fill=INK,
+    )
+    draw.polygon(
+        [(60, top + 66), (132, top + 66), (126, top + 82), (66, top + 82)],
+        fill=RED,
+    )
+    # Three wave arcs under the hull.
+    for x0 in (47, 81, 115):
+        draw.arc([x0, top + 84, x0 + 30, top + 98], 180, 360, fill=GLOBE_BLUE, width=2)
 
 
-def draw_tanker(draw, x, y):
-    """Oil tanker on fire with a spiked mine beside it."""
-    mx, my = x + 16, y + 28
-    for angle in range(0, 360, 45):
-        a = math.radians(angle)
-        draw.line([mx, my, mx + 19 * math.cos(a), my + 19 * math.sin(a)],
-                  fill=INK, width=4)
-    draw.ellipse([mx - 10, my - 10, mx + 10, my + 10], fill=INK)
-    fx, fy = x + 64, y + 24
-    draw.polygon([(fx - 11, fy + 12), (fx, fy - 18), (fx + 11, fy + 12)],
-                 fill=AMBER)
-    draw.polygon([(fx - 5, fy + 12), (fx, fy - 4), (fx + 5, fy + 12)],
-                 fill=(255, 200, 60))
-    draw.rectangle([x + 56, y + 32, x + 72, y + 48], fill=INK)
-    draw.polygon([(x + 8, y + 48), (x + 96, y + 48), (x + 88, y + 64),
-                  (x + 16, y + 64)], fill=INK)
-    draw.polygon([(x + 16, y + 64), (x + 88, y + 64), (x + 82, y + 80),
-                  (x + 22, y + 80)], fill=CRIMSON)
-    draw_waves(draw, x + 2, y + 84, 96)
+def draw_chip(draw, top):
+    """A microchip, pins out, with a rising arrow."""
+    # Bronze pins on all four sides: five along the top and bottom,
+    # four down each side.
+    for x in (62, 78, 94, 110, 123):
+        draw.rectangle([x, top + 4, x + 7, top + 17], fill=BRONZE)
+        draw.rectangle([x, top + 89, x + 7, top + 102], fill=BRONZE)
+    for y in (20, 40, 60, 80):
+        draw.rectangle([46, top + y, 58, top + y + 8], fill=BRONZE)
+        draw.rectangle([132, top + y, 144, top + y + 8], fill=BRONZE)
+    # The green die, with a dark edge round it.
+    draw.rectangle([58, top + 16, 132, top + 90], fill=CHIP_EDGE)
+    draw.rectangle([60, top + 18, 130, top + 88], fill=CHIP_GREEN)
+    # A small red arrow climbing out of the top-left corner.
+    draw.line([(51, top + 31), (69, top + 13)], fill=RED, width=5)
+    draw.line([(69, top + 13), (59, top + 13)], fill=RED, width=5)
+    draw.line([(69, top + 13), (69, top + 23)], fill=RED, width=5)
 
 
-def draw_chip(draw, x, y):
-    """Green microchip with gold pins and a red rising arrow."""
-    for i in range(4):
-        px = x + 18 + i * 20
-        draw.rectangle([px, y + 2, px + 8, y + 13], fill=GOLD)
-        draw.rectangle([px, y + 89, px + 8, y + 100], fill=GOLD)
-        py = y + 18 + i * 20
-        draw.rectangle([x + 2, py, x + 13, py + 8], fill=GOLD)
-        draw.rectangle([x + 89, py, x + 100, py + 8], fill=GOLD)
-    draw.rounded_rectangle([x + 14, y + 14, x + 88, y + 88], radius=6,
-                           fill=(16, 140, 90), outline=(10, 100, 65), width=2)
-    draw.rectangle([x + 36, y + 36, x + 66, y + 66], fill=(240, 240, 235),
-                   outline=(180, 180, 170), width=2)
-    draw.line([x + 6, y + 30, x + 26, y + 10], fill=CRIMSON, width=5)
-    draw.polygon([(x + 26, y + 10), (x + 13, y + 10), (x + 26, y + 23)],
-                 fill=CRIMSON)
+def draw_factory(draw, top):
+    """A factory with a tall chimney, smoke and a flame on the roof."""
+    # Smoke drifting up from the chimney.
+    for centre, radius in (((126, top + 8), 7), ((137, top + 13), 8), ((121, top + 14), 6)):
+        draw.ellipse(
+            [
+                centre[0] - radius,
+                centre[1] - radius,
+                centre[0] + radius,
+                centre[1] + radius,
+            ],
+            fill=SMOKE,
+        )
+    # The shed itself: a roof that slopes down to the left in two
+    # runs, and a tall chimney rising from its peak.
+    draw.polygon(
+        [
+            (48, top + 50),
+            (76, top + 32),
+            (118, top + 20),
+            (134, top + 32),
+            (134, top + 82),
+            (48, top + 82),
+        ],
+        fill=BUILDING,
+    )
+    draw.rectangle([118, top + 20, 132, top + 80], fill=CHIMNEY)
+    # A flame on the roof's left slope.
+    draw.polygon(
+        [(71, top + 20), (77, top + 30), (74, top + 38), (68, top + 38), (65, top + 30)],
+        fill=ORANGE,
+    )
+    # Three lit windows along the wall.
+    for x0 in (58, 75, 92):
+        draw.rectangle([x0, top + 60, x0 + 12, top + 74], fill=GOLD)
 
 
-def draw_factory(draw, x, y):
-    """Factory with smoking chimney and a flame on the roof."""
-    for (sx, sy, sr) in [(x + 80, y + 12, 9), (x + 90, y + 4, 11),
-                         (x + 72, y + 22, 7)]:
-        draw.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(150, 150, 148))
-    draw.polygon([(x + 74, y + 18), (x + 88, y + 18), (x + 90, y + 78),
-                  (x + 72, y + 78)], fill=(88, 88, 86))
-    fx, fy = x + 28, y + 34
-    draw.polygon([(fx - 11, fy + 12), (fx, fy - 16), (fx + 11, fy + 12)],
-                 fill=AMBER)
-    draw.polygon([(fx - 5, fy + 12), (fx, fy - 4), (fx + 5, fy + 12)],
-                 fill=(255, 200, 60))
-    draw.polygon([(x + 4, y + 48), (x + 32, y + 30), (x + 72, y + 48),
-                  (x + 72, y + 80), (x + 4, y + 80)], fill=(118, 118, 114))
-    for wx in (14, 32, 50):
-        draw.rectangle([x + wx, y + 58, x + wx + 10, y + 72], fill=(245, 176, 32))
+ICONS = {
+    "warship": draw_warship,
+    "tanker": draw_tanker,
+    "chip": draw_chip,
+    "factory": draw_factory,
+}
 
 
-# ------------------------------------------------------------------ poster
-def build():
-    img = Image.new("RGB", (SIZE, SIZE), PAPER)
-    d = ImageDraw.Draw(img)
+def draw_globe(draw):
+    """The lead story's cracked globe."""
+    cx, cy = GLOBE_CENTRE
+    r = GLOBE_RADIUS
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=GLOBE_BLUE, outline=TEAL, width=3)
+    # Land, four rough pieces, placed where the old globe has them.
+    draw.polygon([(844, 268), (866, 285), (858, 312), (832, 310), (820, 290)], fill=GLOBE_GREEN)
+    draw.polygon([(910, 268), (924, 288), (920, 305), (895, 308), (880, 282)], fill=GLOBE_GREEN)
+    draw.polygon([(862, 328), (876, 348), (866, 368), (832, 362), (826, 340)], fill=GLOBE_GREEN)
+    draw.polygon([(898, 342), (922, 352), (918, 376), (892, 368)], fill=GLOBE_GREEN)
+    # Two latitude lines, nearly straight, sagging gently to the right.
+    draw.line(
+        [(806, 304), (850, 295), (872, 298), (910, 301), (930, 306)],
+        fill="white",
+        width=2,
+        joint="curve",
+    )
+    draw.line(
+        [(806, 330), (850, 324), (872, 323), (910, 327), (930, 330)],
+        fill="white",
+        width=2,
+        joint="curve",
+    )
+    # The crack: a white edge, then the red split itself.
+    crack = [(848, 252), (836, 275), (850, 295), (839, 320), (849, 335), (861, 355), (850, 375), (855, 388)]
+    draw.line([(x - 3, y - 1) for x, y in crack], fill="white", width=2)
+    draw.line(crack, fill=RED, width=3)
 
-    # outer frame: double rule
-    d.rectangle([16, 16, 1008, 1008], outline=INK, width=2)
-    d.rectangle([22, 22, 1002, 1002], outline=RULE, width=1)
 
-    # ---- masthead ------------------------------------------------------
-    f_kick = load(SANS_B, 20)
-    kick = "WORLD NEWS  •  ONE DAY, THE WHOLE WORLD"
-    tw = d.textlength(kick, font=f_kick)
-    d.text(((SIZE - tw) / 2, 36), kick, font=f_kick, fill=CRIMSON)
-    f_title = load(SERIF, 62)
-    title = "THE DAY IN BRIEF"
-    tw = d.textlength(title, font=f_title)
-    d.text(((SIZE - tw) / 2, 64), title, font=f_title, fill=INK)
-    d.rectangle([30, 140, 994, 143], fill=INK)
-    d.rectangle([30, 147, 994, 149], fill=INK)
+# ---------------------------------------------------------------------------
+# Sections
+# ---------------------------------------------------------------------------
 
-    # ---- date band -----------------------------------------------------
-    d.rectangle([30, 158, 994, 202], fill=TEAL)
-    f_date = load(SANS_B, 30)
-    date = "TUESDAY  —  24 NOVEMBER 2026"
-    tw = d.textlength(date, font=f_date)
-    d.text(((SIZE - tw) / 2, 166), date, font=f_date, fill=WHITE)
+def draw_frame(draw):
+    """The page's double frame: a dark outer line, a hairline inside it."""
+    draw.rectangle([16, 16, SIZE - 16, SIZE - 16], outline=INK, width=2)
+    draw.rectangle([22, 22, SIZE - 22, SIZE - 22], outline=BORDER, width=1)
 
-    # ---- lead story ----------------------------------------------------
-    d.rounded_rectangle([30, 214, 994, 428], radius=10, fill=CARD,
-                        outline=RULE, width=2)
-    d.rectangle([30, 214, 42, 428], fill=CRIMSON_DARK)
-    f_lkick = load(SANS_B, 22)
-    d.text((58, 228), "CLIMATE SUMMIT  •  ANTALYA, TÜRKIYE",
-           font=f_lkick, fill=CRIMSON)
-    f_lhead = load(SERIF, 48)
-    d.text((56, 256), "CLIMATE TALKS", font=f_lhead, fill=INK)
-    d.text((56, 308), "COLLAPSE", font=f_lhead, fill=INK)
-    f_lbody = load(SANS_R, 24)
-    lead = ("UN talks fail after 50 hours of overtime — the first COP "
-            "collapse since Copenhagen 2009. Deadlock: fossil fuels.")
-    draw_lines(d, 58, 362, wrap_text(d, lead, f_lbody, 690), f_lbody, INK, 30)
-    draw_globe(d, 872, 320, 74)
 
-    # ---- story rows ----------------------------------------------------
-    rows = [
-        ("WAR  •  OFF LIBYA",
-         "Ukraine sinks Russian warship",
-         "Sea drones sank the corvette Merkury 2,400 km from the front line.",
-         draw_warship),
-        ("ENERGY  •  STRAIT OF HORMUZ",
-         "Tankers ablaze after mine strikes",
-         "Three tankers catch fire; Iran says it downed a US drone.",
-         draw_tanker),
-        ("MARKETS  •  NVIDIA",
-         "Huang returns; shares jump 30%",
-         "CEO reinstated 11 days after resigning; S&P 500 up 4.7%.",
-         draw_chip),
-        ("ASIA  •  JAKARTA",
-         "24 killed in factory fire",
-         "A blaze sweeps a food factory; dozens still missing.",
-         draw_factory),
-    ]
-    f_rkick = load(SANS_B, 19)
-    f_rhead = load(SERIF, 30)
-    f_rbody = load(SANS_R, 21)
-    y = 440
-    for kicker, headline, body, icon_fn in rows:
-        d.rounded_rectangle([30, y, 994, y + 100], radius=8, fill=CARD,
-                            outline=RULE, width=2)
-        icon_fn(d, 44, y + 2)
-        tx = 158
-        d.text((tx, y + 12), kicker, font=f_rkick, fill=CRIMSON)
-        d.text((tx, y + 38), headline, font=f_rhead, fill=INK)
-        draw_lines(d, tx, y + 72, wrap_text(d, body, f_rbody, 994 - tx - 18),
-                   f_rbody, MUTED, 26)
-        y += 104
+def draw_masthead(draw):
+    """Kicker, title and the double rule underneath."""
+    centred(draw, MASTHEAD_KICKER_TOP, "WORLD NEWS • ONE DAY, THE WHOLE WORLD", KICKER_FONT, RED)
+    centred(draw, TITLE_TOP, "THE DAY IN BRIEF", TITLE_FONT, INK)
+    draw.line([(MARGIN, RULE_TOP_Y), (RIGHT, RULE_TOP_Y)], fill=INK, width=2)
+    draw.line([(MARGIN, RULE_BOTTOM_Y), (RIGHT, RULE_BOTTOM_Y)], fill=INK, width=1)
 
-    # ---- also today ----------------------------------------------------
-    d.rounded_rectangle([30, 860, 994, 962], radius=10, fill=TEAL_SOFT,
-                        outline=RULE, width=2)
-    f_also = load(SANS_B, 22)
-    d.text((48, 870), "ALSO TODAY", font=f_also, fill=TEAL)
-    f_lab = load(SANS_B, 18)
-    f_txt = load(SANS_R, 18)
-    left_items = [
-        ("GAZA", "Strikes kill four, incl. a UN aid worker."),
-        ("TECH", "States sue Musk firms over Grok images."),
-        ("USA", "Storms threaten Thanksgiving travel."),
-    ]
-    right_items = [
-        ("BANGLADESH", "Hasina plans return on 16 December."),
-        ("NATO", "Russia probed NATO airspace 25 times."),
-        ("CUBA", "WHO chief visits amid a health crisis."),
-    ]
-    for col_x, items in ((48, left_items), (528, right_items)):
-        yy = 900
-        for label, rest in items:
-            d.text((col_x, yy), label, font=f_lab, fill=CRIMSON)
-            lx = col_x + d.textlength(label + "  ", font=f_lab)
-            d.text((lx, yy), rest, font=f_txt, fill=INK)
-            yy += 22
 
-    # ---- footer --------------------------------------------------------
-    f_foot = load(SANS_R, 17)
-    foot = "Sources: CNN • Reuters • AP • Al Jazeera • WSJ • The Times  —  24 November 2026"
-    tw = d.textlength(foot, font=f_foot)
-    d.text(((SIZE - tw) / 2, 974), foot, font=f_foot, fill=MUTED)
+def draw_date_bar(draw):
+    """The dark teal bar with the day's date."""
+    draw.rectangle(DATE_BAR, fill=TEAL)
+    centred(draw, 165, "TUESDAY — 24 NOVEMBER 2026", DATE_FONT, "white")
 
-    out = os.path.join(HERE, "entry.png")
-    img.save(out, "PNG")
-    with open(out, "rb") as fh:
-        digest = hashlib.sha256(fh.read()).hexdigest()
-    print(f"wrote {out}  {img.size}  sha256={digest}")
+
+def draw_lead(draw):
+    """The big story: red side bar, two-line headline, globe on the right."""
+    box(draw, LEAD_BOX, fill=BOX)
+    draw.rectangle([LEAD_BOX[0], LEAD_BOX[1], 42, LEAD_BOX[3]], fill=DARK_RED)
+    draw.text((LEAD_KICKER_X, 229), LEAD["kicker"], font=LEAD_KICKER_FONT, fill=RED)
+    draw.text((LEAD_TEXT_X, 256), LEAD["headline"][0], font=LEAD_HEAD_FONT, fill=INK)
+    draw.text((LEAD_TEXT_X, 308), LEAD["headline"][1], font=LEAD_HEAD_FONT, fill=INK)
+    deck = wrap(draw, LEAD["deck"], LEAD_DECK_FONT, LEAD_DECK_WIDTH)
+    for step, line in enumerate(deck):
+        draw.text(
+            (LEAD_DECK_X, 362 + step * 30), line, font=LEAD_DECK_FONT, fill=INK
+        )
+    draw_globe(draw)
+
+
+def draw_story_row(draw, top, story):
+    """One of the four rows: kicker, headline, deck, icon on the left."""
+    box(draw, (MARGIN, top, RIGHT, top + ROW_HEIGHT), fill=BOX)
+    draw.text((ROW_HEADLINE_X, top + ROW_KICKER_DY), story["kicker"], font=ROW_KICKER_FONT, fill=RED)
+    draw.text(
+        (ROW_HEADLINE_X, top + ROW_HEADLINE_DY),
+        story["headline"],
+        font=ROW_HEAD_FONT,
+        fill=INK,
+    )
+    draw.text(
+        (ROW_DECK_X, top + ROW_DECK_DY), story["deck"], font=ROW_DECK_FONT, fill=GREY
+    )
+    ICONS[story["icon"]](draw, top)
+
+
+def draw_also_today(draw):
+    """The round-up box: three short items a side."""
+    box(draw, ALSO_BOX, fill=ALSO_BG)
+    draw.text((ALSO_HEAD_X, ALSO_HEAD_TOP), "ALSO TODAY", font=ALSO_HEAD_FONT, fill=TEAL)
+    for column, items in ((ALSO_LEFT_X, ALSO_LEFT), (ALSO_RIGHT_X, ALSO_RIGHT)):
+        for top, (label, text) in zip(ALSO_ITEM_TOPS, items):
+            draw.text((column, top), label, font=ALSO_LABEL_FONT, fill=RED)
+            label_width = draw.textlength(label, font=ALSO_LABEL_FONT)
+            draw.text(
+                (column + label_width + 8, top), text, font=ALSO_TEXT_FONT, fill=INK
+            )
+
+
+def draw_footer(draw):
+    """The source line under the Also Today box."""
+    centred(draw, FOOTER_TOP, FOOTER, FOOTER_FONT, GREY)
+
+
+# ---------------------------------------------------------------------------
+# Build it
+# ---------------------------------------------------------------------------
+
+def build_poster():
+    """Draw the whole front page and hand it back."""
+    image = Image.new("RGB", (SIZE, SIZE), PAPER)
+    draw = ImageDraw.Draw(image)
+    draw_frame(draw)
+    draw_masthead(draw)
+    draw_date_bar(draw)
+    draw_lead(draw)
+    for top, story in zip(ROW_TOPS, STORIES):
+        draw_story_row(draw, top, story)
+    draw_also_today(draw)
+    draw_footer(draw)
+    return image
 
 
 if __name__ == "__main__":
-    build()
+    poster = build_poster()
+    poster.save("entry.png")
+    print("Wrote entry.png", poster.size)
