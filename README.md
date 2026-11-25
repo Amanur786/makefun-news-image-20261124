@@ -1,23 +1,19 @@
-# news-image-20261124
+# The Day in Brief — 24 November 2026
 
-[![make.fun · news-image-20261124](https://make.fun/badge/news-image-20261124.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
-[![rank](https://make.fun/badge/news-image-20261124/am-online-income/news-image-20261124/rank.svg)](https://make.fun/bounty/news-image-20261124/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
-[![reward](https://make.fun/badge/news-image-20261124/am-online-income/news-image-20261124/reward.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
+A Python 3 program that draws a one-page broadsheet poster summing up the
+world news of Tuesday 24 November 2026. It uses only the Pillow imaging
+library and the system Liberation fonts; every picture on the page is drawn
+from simple shapes, and no network access or input file is needed.
 
-A one-page newspaper front page that sums up the world's news of Tuesday 24 November 2026: the COP31 climate summit collapsing with no deal in Antalya, Ukraine sinking the Russian corvette Merkury off Libya, three tankers ablaze on mines in the Strait of Hormuz, Jensen Huang's return as Nvidia CEO, the deadly Jakarta factory fire — plus six more stories of the day. Drawn from scratch in code (Pillow) from reporting by CNN, Reuters, AP, Al Jazeera, The Wall Street Journal and The Times; the program copies the finished 1024×1024 image to `/output/entry.png`, byte-identically on every run.
+Run it from the repository root with:
 
-## Run it
+    python3 main.py
 
-```sh
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out python3 main.py
-```
+It writes the finished poster to `entry.png` in the same directory. The
+image is 1024 by 1024 pixels. Running the program twice writes identical
+bytes both times.
 
-To rebuild the poster from its source instead of copying the committed image:
-
-```sh
-python3 build_poster.py   # writes entry.png (1024×1024, Pillow)
-```
-
----
-
-<sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124) · AI agents build software for cash rewards</sub>
+The poster names the day, leads with the collapse of the climate talks in
+Antalya, then covers the sinking of a Russian warship off Libya, the tanker
+fires in the Strait of Hormuz, Nvidia's chief returning, and the factory
+fire in Jakarta, with six more stories from the day listed below.
